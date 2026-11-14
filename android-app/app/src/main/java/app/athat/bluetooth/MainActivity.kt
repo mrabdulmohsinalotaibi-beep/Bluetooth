@@ -43,7 +43,8 @@ class MainActivity : Activity() {
         val device: BluetoothDevice,
         var name: String,
         var category: String,
-        var paired: Boolean
+        var paired: Boolean,
+        var rssi: Int? = null
     )
 
     private val timeout = Runnable { stopScan("اكتمل البحث. يمكنك إعادة الفحص لاكتشاف أجهزة أخرى.") }
@@ -56,7 +57,8 @@ class MainActivity : Activity() {
                     val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
                     if (device != null) {
                         val announced = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
-                        addDevice(device, announced)
+                        val rssi = if (intent.hasExtra(BluetoothDevice.EXTRA_RSSI)) intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt().takeUnless { it == Short.MIN_VALUE.toInt() } else null
+                        addDevice(device, announced, rssi)
                     }
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
@@ -73,10 +75,10 @@ class MainActivity : Activity() {
 
     private val bleCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            runOnUiThread { addDevice(result.device, result.scanRecord?.deviceName) }
+            runOnUiThread { addDevice(result.device, result.scanRecord?.deviceName, result.rssi) }
         }
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
-            runOnUiThread { results.forEach { addDevice(it.device, it.scanRecord?.deviceName) } }
+            runOnUiThread { results.forEach { addDevice(it.device, it.scanRecord?.deviceName, it.rssi) } }
         }
         override fun onScanFailed(errorCode: Int) {
             runOnUiThread {
@@ -120,7 +122,7 @@ class MainActivity : Activity() {
         }
         root.addView(title)
         val subtitle = TextView(this).apply {
-            text = "الأجهزة القريبة — الأسماء الحقيقية المعلنة"
+            text = "الأجهزة القريبة — النوع والقرب التقريبي"
             textSize = 15f
             gravity = Gravity.CENTER
             setTextColor(Color.DKGRAY)
@@ -158,7 +160,7 @@ class MainActivity : Activity() {
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(TextView(this).apply {
-            text = "يتطلب البحث إذن الأجهزة القريبة. لا نرفع النتائج لأي خادم. الاقتران يحتاج موافقة النظام أو الجهاز."
+            text = "المسافة ليست قياسًا دقيقًا؛ يُقدَّر القرب من إشارة RSSI التي تتأثر بالجدران والعوائق. لا نرفع نتائج البحث لأي خادم. الاقتران يحتاج موافقة."
             textSize = 12f
             setTextColor(Color.GRAY)
             gravity = Gravity.CENTER
@@ -247,26 +249,55 @@ class MainActivity : Activity() {
         } catch (_: SecurityException) { status.text = "لا توجد صلاحية لقراءة الأجهزة المقترنة." }
     }
 
-    private fun category(device: BluetoothDevice): String {
+    // RSSI is a received signal measurement, not a distance sensor.
+    private fun proximity(rssi: Int?): String = when {
+        rssi == null -> "المسافة غير متاحة (لم تُرصد إشارة حديثة)"
+        rssi >= -55 -> "قريب جدًا (ربما ضمن نحو مترين) · ${rssi} dBm"
+        rssi >= -70 -> "قريب (تقريبًا 2–8 أمتار) · ${rssi} dBm"
+        rssi >= -85 -> "أبعد نسبيًا (قد يزيد على 8 أمتار) · ${rssi} dBm"
+        else -> "إشارة ضعيفة جدًا (المسافة غير مؤكدة) · ${rssi} dBm"
+    }
+
+    private fun category(device: BluetoothDevice, name: String): String {
         val btClass = try { device.bluetoothClass } catch (_: SecurityException) { null }
         val major = btClass?.majorDeviceClass
-        return when (major) {
-            BluetoothClass.Device.Major.AUDIO_VIDEO -> "جهاز صوتي أو مرئي"
-            BluetoothClass.Device.Major.PHONE -> "هاتف"
-            BluetoothClass.Device.Major.COMPUTER -> "كمبيوتر"
-            BluetoothClass.Device.Major.WEARABLE -> "جهاز قابل للارتداء"
-            BluetoothClass.Device.Major.PERIPHERAL -> "ملحق حاسوب"
-            BluetoothClass.Device.Major.IMAGING -> "طابعة أو جهاز تصوير"
+        if (major == BluetoothClass.Device.Major.AUDIO_VIDEO) {
+            val minor = btClass.deviceClass
+            return when (minor) {
+                BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
+                BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET -> "سماعة رأس"
+                BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER,
+                BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO -> "سماعة أو نظام صوتي"
+                BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> "نظام صوت سيارة"
+                BluetoothClass.Device.AUDIO_VIDEO_MICROPHONE -> "ميكروفون"
+                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
+                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR -> "شاشة أو جهاز مرئي"
+                else -> "جهاز صوتي أو مرئي"
+            }
+        }
+        when (major) {
+            BluetoothClass.Device.Major.PHONE -> return "هاتف"
+            BluetoothClass.Device.Major.COMPUTER -> return "كمبيوتر"
+            BluetoothClass.Device.Major.WEARABLE -> return "ساعة أو جهاز قابل للارتداء"
+            BluetoothClass.Device.Major.PERIPHERAL -> return "ملحق حاسوب"
+            BluetoothClass.Device.Major.IMAGING -> return "طابعة أو جهاز تصوير"
+        }
+        val n = name.lowercase()
+        return when {
+            Regex("speaker|headphone|headset|earbud|airpods|buds|soundbar|jbl|bose|soundcore|سماعة").containsMatchIn(n) -> "سماعة (تقدير من الاسم)"
+            Regex("watch|fitbit|amazfit|garmin|band|ساعة").containsMatchIn(n) -> "ساعة ذكية (تقدير من الاسم)"
+            Regex("iphone|galaxy|pixel|phone|هاتف").containsMatchIn(n) -> "هاتف (تقدير من الاسم)"
+            Regex("printer|طابعة").containsMatchIn(n) -> "طابعة (تقدير من الاسم)"
             else -> when (device.type) {
-                BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Bluetooth Classic — النوع غير محدد"
-                BluetoothDevice.DEVICE_TYPE_LE -> "Bluetooth Low Energy — النوع غير محدد"
-                BluetoothDevice.DEVICE_TYPE_DUAL -> "Bluetooth مزدوج — النوع غير محدد"
-                else -> "النوع غير معروف"
+                BluetoothDevice.DEVICE_TYPE_CLASSIC -> "جهاز Bluetooth Classic · نوعه غير معروف"
+                BluetoothDevice.DEVICE_TYPE_LE -> "جهاز Bluetooth Low Energy · نوعه غير معروف"
+                BluetoothDevice.DEVICE_TYPE_DUAL -> "جهاز بلوتوث مزدوج · نوعه غير معروف"
+                else -> "نوع الجهاز غير معروف"
             }
         }
     }
 
-    private fun addDevice(device: BluetoothDevice, announcedName: String?) {
+    private fun addDevice(device: BluetoothDevice, announcedName: String?, rssi: Int? = null) {
         if (!hasPermissions()) return
         try {
             val address = device.address
@@ -274,9 +305,10 @@ class MainActivity : Activity() {
                 ?: device.name?.trim()?.takeIf { it.isNotEmpty() }
             val prior = entries[address]
             val displayName = resolvedName ?: prior?.name ?: "جهاز غير معروف"
-            val type = category(device)
+            val type = category(device, displayName)
             val paired = device.bondState == BluetoothDevice.BOND_BONDED
-            entries[address] = DeviceEntry(device, displayName, type, paired)
+            val strength = rssi?.takeIf { it in -127..-1 } ?: prior?.rssi
+            entries[address] = DeviceEntry(device, displayName, type, paired, strength)
             updateList()
         } catch (_: SecurityException) {
             status.text = "لم يسمح النظام بقراءة معلومات الجهاز."
@@ -313,6 +345,12 @@ class MainActivity : Activity() {
                     textSize = 13f
                     setTextColor(Color.DKGRAY)
                     setPadding(0, dp(4), 0, 0)
+                })
+                card.addView(TextView(this).apply {
+                    text = "القرب: " + proximity(entry.rssi)
+                    textSize = 13f
+                    setTextColor(Color.rgb(63, 83, 108))
+                    setPadding(0, dp(5), 0, 0)
                 })
                 if (!entry.paired) {
                     card.addView(Button(this).apply {
