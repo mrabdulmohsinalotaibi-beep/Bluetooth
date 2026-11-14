@@ -215,7 +215,7 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = true
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
         }
-        page.addView(root, ScrollView.LayoutParams(-1, -2))
+        page.addView(root)
         setContentView(page)
         updateList()
     }
@@ -531,6 +531,8 @@ class MainActivity : Activity() {
         val entry = entries[changedAddress] ?: return
         var display = cards[changedAddress]
         if (display == null) {
+            // Remove the one-time empty-state placeholder before adding the first device.
+            if (cards.isEmpty() && list.childCount > 0) list.removeAllViews()
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(12), dp(14), dp(10))
