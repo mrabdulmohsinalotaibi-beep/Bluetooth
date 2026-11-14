@@ -18,6 +18,9 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.media.MediaPlayer
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -34,6 +37,9 @@ class MainActivity : Activity() {
     private var adapter: BluetoothAdapter? = null
     private var scanning = false
     private var receiverRegistered = false
+    private var player: MediaPlayer? = null
+    private var selectedAudio: Uri? = null
+    private lateinit var audioInfo: TextView
     private lateinit var status: TextView
     private lateinit var list: LinearLayout
     private lateinit var scanButton: Button
@@ -67,7 +73,19 @@ class MainActivity : Activity() {
                 }
                 BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
                     val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                    if (device != null) addDevice(device, null)
+                    if (device != null) {
+                        addDevice(device, null)
+                        val bond = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+                        status.text = when (bond) {
+                            BluetoothDevice.BOND_BONDED -> "اكتمل الاقتران. حدد السماعة كمخرج صوت من إعدادات الهاتف."
+                            BluetoothDevice.BOND_BONDING -> "جارٍ الاقتران. أكمل الموافقة على الجهازين."
+                            else -> "لم يكتمل الاقتران. ضع الجهاز في وضع الاقتران وحاول مجددًا."
+                        }
+                    }
+                }
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_ON)
+                        status.text = "البلوتوث يعمل الآن؛ اضغط البحث عن الأجهزة."
                 }
             }
         }
@@ -98,6 +116,7 @@ class MainActivity : Activity() {
             addAction(BluetoothDevice.ACTION_FOUND)
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
             addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         else registerReceiver(receiver, filter)
@@ -139,6 +158,21 @@ class MainActivity : Activity() {
             setOnClickListener { if (hasPermissions()) showPaired() else requestNeededPermissions() }
         })
         root.addView(Button(this).apply {
+            text = "اختيار ملف صوتي من الجهاز"
+            setOnClickListener { selectAudio() }
+        })
+        audioInfo = TextView(this).apply {
+            text = "لم تختر ملفًا صوتيًا"
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, dp(7), 0, dp(6))
+        }
+        root.addView(audioInfo)
+        root.addView(Button(this).apply {
+            text = "تشغيل / إيقاف الصوت"
+            setOnClickListener { toggleAudio() }
+        })
+        root.addView(Button(this).apply {
             text = "إعدادات البلوتوث"
             setOnClickListener { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
         })
@@ -168,6 +202,64 @@ class MainActivity : Activity() {
         })
         setContentView(root)
         updateList()
+    }
+
+    private fun selectAudio() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+        }
+        startActivityForResult(intent, 201)
+    }
+
+    @Deprecated("Framework-compatible file picker")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 201 || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        catch (_: SecurityException) { }
+        selectedAudio = uri
+        player?.release()
+        player = null
+        var filename = "ملف صوتي محدد"
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) filename = cursor.getString(0) ?: filename
+            }
+        } catch (_: Exception) { }
+        audioInfo.text = "الملف: " + filename
+        status.text = "تم اختيار الملف؛ الصوت يعمل عبر مخرج الصوت المختار في نظام أندرويد."
+    }
+
+    private fun toggleAudio() {
+        if (player?.isPlaying == true) {
+            player?.pause()
+            status.text = "تم إيقاف الموسيقى مؤقتًا."
+            return
+        }
+        if (player != null) {
+            player?.start()
+            status.text = "جارٍ تشغيل الموسيقى."
+            return
+        }
+        val uri = selectedAudio ?: run {
+            status.text = "اختر ملفًا صوتيًا أولًا."
+            return
+        }
+        try {
+            player = MediaPlayer().apply {
+                setDataSource(this@MainActivity, uri)
+                setOnCompletionListener { status.text = "انتهى تشغيل الملف." }
+                prepare()
+                start()
+            }
+            status.text = "جارٍ التشغيل على مخرج الصوت المختار في أندرويد."
+        } catch (_: Exception) {
+            player?.release()
+            player = null
+            status.text = "تعذر تشغيل الملف؛ جرّب صيغة MP3."
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -378,6 +470,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         stopScan(null)
         if (receiverRegistered) unregisterReceiver(receiver)
+        player?.release()
+        player = null
         super.onDestroy()
     }
 }
