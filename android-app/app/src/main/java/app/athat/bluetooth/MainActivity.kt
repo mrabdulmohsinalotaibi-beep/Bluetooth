@@ -44,13 +44,24 @@ class MainActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var scanButton: Button
     private lateinit var count: TextView
+    private lateinit var page: ScrollView
+    private val cards = linkedMapOf<String, DeviceCard>()
 
     private data class DeviceEntry(
         val device: BluetoothDevice,
         var name: String,
         var category: String,
+        var source: String,
         var paired: Boolean,
-        var rssi: Int? = null
+        var rssi: Int? = null,
+        var appearance: Int? = null
+    )
+    private data class DeviceCard(
+        val name: TextView,
+        val category: TextView,
+        val source: TextView,
+        val proximity: TextView,
+        val pair: Button
     )
 
     private val timeout = Runnable { stopScan("اكتمل البحث. يمكنك إعادة الفحص لاكتشاف أجهزة أخرى.") }
@@ -93,10 +104,10 @@ class MainActivity : Activity() {
 
     private val bleCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            runOnUiThread { addDevice(result.device, result.scanRecord?.deviceName, result.rssi) }
+            runOnUiThread { addDevice(result.device, result.scanRecord?.deviceName, result.rssi, appearanceFromAdvertisement(result.scanRecord?.bytes)) }
         }
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
-            runOnUiThread { results.forEach { addDevice(it.device, it.scanRecord?.deviceName, it.rssi) } }
+            runOnUiThread { results.forEach { addDevice(it.device, it.scanRecord?.deviceName, it.rssi, appearanceFromAdvertisement(it.scanRecord?.bytes)) } }
         }
         override fun onScanFailed(errorCode: Int) {
             runOnUiThread {
@@ -189,10 +200,9 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, dp(10))
         }
         root.addView(count)
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        // One scroll surface for the whole page: no nested scrolling or zero-height list.
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(list)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(list, LinearLayout.LayoutParams(-1, -2))
         root.addView(TextView(this).apply {
             text = "المسافة ليست قياسًا دقيقًا؛ يُقدَّر القرب من إشارة RSSI التي تتأثر بالجدران والعوائق. لا نرفع نتائج البحث لأي خادم. الاقتران يحتاج موافقة."
             textSize = 12f
@@ -200,7 +210,13 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, 0)
         })
-        setContentView(root)
+        page = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        }
+        page.addView(root, ScrollView.LayoutParams(-1, -2))
+        setContentView(page)
         updateList()
     }
 
@@ -293,6 +309,8 @@ class MainActivity : Activity() {
             }
             stopScan(null)
             entries.clear()
+            cards.clear()
+            list.removeAllViews()
             showPaired()
             scanning = true
             scanButton.isEnabled = false
@@ -350,110 +368,216 @@ class MainActivity : Activity() {
         else -> "إشارة ضعيفة جدًا (المسافة غير مؤكدة) · ${rssi} dBm"
     }
 
-    private fun category(device: BluetoothDevice, name: String): String {
-        val btClass = try { device.bluetoothClass } catch (_: SecurityException) { null }
-        val major = btClass?.majorDeviceClass
-        if (major == BluetoothClass.Device.Major.AUDIO_VIDEO) {
-            val minor = btClass.deviceClass
-            return when (minor) {
-                BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
-                BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET -> "سماعة رأس"
-                BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER,
-                BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO -> "سماعة أو نظام صوتي"
-                BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> "نظام صوت سيارة"
-                BluetoothClass.Device.AUDIO_VIDEO_MICROPHONE -> "ميكروفون"
-                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
-                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR -> "شاشة أو جهاز مرئي"
-                else -> "جهاز صوتي أو مرئي"
+
+    // Appearance (AD type 0x19) is a standardized BLE device category.
+    // Some devices do not advertise it; missing data must not be invented.
+    private fun appearanceFromAdvertisement(data: ByteArray?): Int? {
+        if (data == null) return null
+        var pos = 0
+        while (pos < data.size) {
+            val length = data[pos].toInt() and 0xff
+            if (length == 0 || pos + 1 + length > data.size) break
+            if (length >= 3 && (data[pos + 1].toInt() and 0xff) == 0x19) {
+                return (data[pos + 2].toInt() and 0xff) or
+                    ((data[pos + 3].toInt() and 0xff) shl 8)
             }
+            pos += 1 + length
         }
-        when (major) {
-            BluetoothClass.Device.Major.PHONE -> return "هاتف"
-            BluetoothClass.Device.Major.COMPUTER -> return "كمبيوتر"
-            BluetoothClass.Device.Major.WEARABLE -> return "ساعة أو جهاز قابل للارتداء"
-            BluetoothClass.Device.Major.PERIPHERAL -> return "ملحق حاسوب"
-            BluetoothClass.Device.Major.IMAGING -> return "طابعة أو جهاز تصوير"
-        }
-        val n = name.lowercase()
-        return when {
-            Regex("speaker|headphone|headset|earbud|airpods|buds|soundbar|jbl|bose|soundcore|سماعة").containsMatchIn(n) -> "سماعة (تقدير من الاسم)"
-            Regex("watch|fitbit|amazfit|garmin|band|ساعة").containsMatchIn(n) -> "ساعة ذكية (تقدير من الاسم)"
-            Regex("iphone|galaxy|pixel|phone|هاتف").containsMatchIn(n) -> "هاتف (تقدير من الاسم)"
-            Regex("printer|طابعة").containsMatchIn(n) -> "طابعة (تقدير من الاسم)"
-            else -> when (device.type) {
-                BluetoothDevice.DEVICE_TYPE_CLASSIC -> "جهاز Bluetooth Classic · نوعه غير معروف"
-                BluetoothDevice.DEVICE_TYPE_LE -> "جهاز Bluetooth Low Energy · نوعه غير معروف"
-                BluetoothDevice.DEVICE_TYPE_DUAL -> "جهاز بلوتوث مزدوج · نوعه غير معروف"
-                else -> "نوع الجهاز غير معروف"
+        return null
+    }
+
+    private fun appearanceCategory(value: Int?): String? {
+        if (value == null || value == 0) return null
+        val group = value ushr 6
+        val variant = value and 0x3f
+        return when (group) {
+            0x001 -> "📱 هاتف"
+            0x002 -> if (variant == 0x07) "📱 تابلت" else "💻 كمبيوتر"
+            0x003 -> "⌚ ساعة ذكية"
+            0x005 -> "🖥️ شاشة"
+            0x00D -> "⌚ جهاز قياس نبض"
+            0x00F -> when (variant) {
+                0x01 -> "⌨️ لوحة مفاتيح"
+                0x02 -> "🖱️ فأرة"
+                0x04 -> "🎮 يد ألعاب"
+                else -> "⌨️ ملحق حاسوب"
             }
+            0x014 -> "📡 جهاز شبكة"
+            0x016 -> "💡 إضاءة ذكية"
+            0x01A -> "💧 جهاز ترطيب"
+            0x021 -> when (variant) {
+                0x02 -> "🔊 ساوندبار"
+                else -> "🔊 سماعة أو مخرج صوت"
+            }
+            0x022 -> "🎤 جهاز إدخال صوت"
+            0x024 -> "🏠 جهاز منزلي"
+            0x025 -> "🎧 سماعة قابلة للارتداء"
+            0x029 -> "🦻 سماعة طبية"
+            else -> null
         }
     }
 
-    private fun addDevice(device: BluetoothDevice, announcedName: String?, rssi: Int? = null) {
+    private fun category(device: BluetoothDevice, name: String, appearance: Int?): Pair<String, String> {
+        // Specific Bluetooth Classic device class is more meaningful than a brand guess.
+        val btClass = try { device.bluetoothClass } catch (_: SecurityException) { null }
+        val major = btClass?.majorDeviceClass
+        val minor = btClass?.deviceClass
+        if (major == BluetoothClass.Device.Major.AUDIO_VIDEO) {
+            val exact = when (minor) {
+                BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
+                BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET -> "🎧 سماعة رأس"
+                BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER,
+                BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO -> "🔊 سماعة أو نظام صوتي"
+                BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> "🚗 نظام صوت سيارة"
+                BluetoothClass.Device.AUDIO_VIDEO_MICROPHONE -> "🎤 ميكروفون"
+                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
+                BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR -> "🖥️ شاشة"
+                else -> null
+            }
+            if (exact != null) return exact to "نوع معلن في تصنيف Bluetooth Classic"
+        }
+        if (major == BluetoothClass.Device.Major.COMPUTER && minor == BluetoothClass.Device.COMPUTER_LAPTOP)
+            return "💻 لابتوب" to "نوع معلن في تصنيف Bluetooth Classic"
+        if (major == BluetoothClass.Device.Major.PHONE)
+            return "📱 هاتف" to "نوع معلن في تصنيف Bluetooth Classic"
+
+        val bleType = appearanceCategory(appearance)
+        if (bleType != null) return bleType to "نوع معلن في بيانات Bluetooth LE"
+
+        // Generic Classic classes may be too broad for a useful category.
+        val n = name.trim().lowercase()
+        val nameType: String? = when {
+            Regex("""(le[_ -]?)?(wh|wf)[-_ ]?1000xm[4-9]|airpods|headphone|headset|earbud|earphone|buds|soundbar|speaker|jbl|bose|soundcore|marshall|beats|سماعة""").containsMatchIn(n) ->
+                "🎧 سماعة / جهاز صوتي"
+            Regex("""ipad|tablet|xiaomi\s*pad|redmi\s*pad|galaxy\s*tab|lenovo\s*tab|pixel\s*tablet|surface\s*pro|تابلت|جهاز لوحي""").containsMatchIn(n) ->
+                "📱 تابلت"
+            Regex("""whoop|watch|fitbit|amazfit|garmin|smartband|smart\s*band|ساعة""").containsMatchIn(n) ->
+                "⌚ ساعة أو سوار ذكي"
+            Regex("""iphone|galaxy\s*s\d|pixel\s*\d|redmi\s*note|\bphone\b|هاتف""").containsMatchIn(n) ->
+                "📱 هاتف"
+            Regex("""macbook|laptop|thinkpad|desktop|computer|\bpc\b|كمبيوتر|حاسوب""").containsMatchIn(n) ->
+                "💻 كمبيوتر"
+            Regex("""keyboard|logitech\s*k|لوحة مفاتيح""").containsMatchIn(n) -> "⌨️ لوحة مفاتيح"
+            Regex("""\bmouse\b|فأرة""").containsMatchIn(n) -> "🖱️ فأرة"
+            Regex("""printer|طابعة""").containsMatchIn(n) -> "🖨️ طابعة"
+            Regex("""smart\s*tv|television|android\s*tv|تلفاز""").containsMatchIn(n) -> "📺 تلفاز"
+            else -> null
+        }
+        if (nameType != null) return nameType to "تقدير من اسم الجهاز فقط؛ غير مؤكد"
+
+        val broad: String? = when (major) {
+            BluetoothClass.Device.Major.COMPUTER -> "💻 كمبيوتر"
+            BluetoothClass.Device.Major.AUDIO_VIDEO -> "🔊 جهاز صوتي أو مرئي"
+            BluetoothClass.Device.Major.WEARABLE -> "⌚ جهاز قابل للارتداء"
+            BluetoothClass.Device.Major.PERIPHERAL -> "⌨️ ملحق حاسوب"
+            BluetoothClass.Device.Major.IMAGING -> "🖨️ جهاز طباعة أو تصوير"
+            BluetoothClass.Device.Major.HEALTH -> "🩺 جهاز صحي"
+            else -> null
+        }
+        if (broad != null) return broad to "فئة عامة معلنة عبر Bluetooth Classic"
+        return "❔ نوع الجهاز غير معروف" to "لم يعلن الجهاز نوعًا يمكن التحقق منه"
+    }
+
+    private fun addDevice(
+        device: BluetoothDevice,
+        announcedName: String?,
+        rssi: Int? = null,
+        appearance: Int? = null
+    ) {
         if (!hasPermissions()) return
         try {
             val address = device.address
+            val prior = entries[address]
             val resolvedName = announcedName?.trim()?.takeIf { it.isNotEmpty() }
                 ?: device.name?.trim()?.takeIf { it.isNotEmpty() }
-            val prior = entries[address]
-            val displayName = resolvedName ?: prior?.name ?: "جهاز غير معروف"
-            val type = category(device, displayName)
+            val displayName = resolvedName ?: prior?.name ?: "جهاز دون اسم معلن"
+            val measured = rssi?.takeIf { it in -127..-1 } ?: prior?.rssi
+            val advertisedAppearance = appearance ?: prior?.appearance
+            val (type, evidence) = category(device, displayName, advertisedAppearance)
             val paired = device.bondState == BluetoothDevice.BOND_BONDED
-            val strength = rssi?.takeIf { it in -127..-1 } ?: prior?.rssi
-            entries[address] = DeviceEntry(device, displayName, type, paired, strength)
-            updateList()
+            if (prior == null) {
+                entries[address] = DeviceEntry(
+                    device, displayName, type, evidence, paired, measured, advertisedAppearance
+                )
+            } else {
+                prior.name = displayName
+                prior.category = type
+                prior.source = evidence
+                prior.paired = paired
+                prior.rssi = measured
+                prior.appearance = advertisedAppearance
+            }
+            // Update an existing row in place; never rebuild 100+ rows on every BLE packet.
+            updateList(address)
         } catch (_: SecurityException) {
             status.text = "لم يسمح النظام بقراءة معلومات الجهاز."
         }
     }
 
-    private fun updateList() {
-        count.text = "الأجهزة (${entries.size})"
-        list.removeAllViews()
+    private fun updateList(changedAddress: String? = null) {
+        count.text = "الأجهزة (${entries.size}) — اسحب لأعلى أو لأسفل"
         if (entries.isEmpty()) {
-            list.addView(TextView(this).apply {
-                text = "لم تظهر أجهزة بعد. تأكد من جعل الأجهزة القريبة قابلة للاكتشاف ثم اضغط البحث."
-                textSize = 14f
-                setTextColor(Color.GRAY)
-                setPadding(dp(8), dp(18), dp(8), dp(18))
-            })
+            if (list.childCount == 0) {
+                list.addView(TextView(this).apply {
+                    text = "لم تظهر أجهزة بعد. تأكد من جعل الأجهزة القريبة قابلة للاكتشاف ثم اضغط البحث."
+                    textSize = 14f
+                    setTextColor(Color.GRAY)
+                    setPadding(dp(8), dp(18), dp(8), dp(18))
+                })
+            }
             return
         }
-        entries.values.sortedWith(compareByDescending<DeviceEntry> { it.paired }.thenBy { it.name })
-            .forEach { entry ->
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(14), dp(12), dp(14), dp(10))
-                    setBackgroundColor(Color.WHITE)
-                }
-                card.addView(TextView(this).apply {
-                    text = entry.name
-                    textSize = 17f
-                    setTypeface(null, Typeface.BOLD)
-                    setTextColor(Color.BLACK)
-                })
-                card.addView(TextView(this).apply {
-                    text = entry.category + " · " + if (entry.paired) "مقترن" else "غير مقترن"
-                    textSize = 13f
-                    setTextColor(Color.DKGRAY)
-                    setPadding(0, dp(4), 0, 0)
-                })
-                card.addView(TextView(this).apply {
-                    text = "القرب: " + proximity(entry.rssi)
-                    textSize = 13f
-                    setTextColor(Color.rgb(63, 83, 108))
-                    setPadding(0, dp(5), 0, 0)
-                })
-                if (!entry.paired) {
-                    card.addView(Button(this).apply {
-                        text = "طلب اقتران"
-                        setOnClickListener { pairDevice(entry.device) }
-                    })
-                }
-                val params = LinearLayout.LayoutParams(-1, -2)
-                params.bottomMargin = dp(10)
-                list.addView(card, params)
+        if (changedAddress == null) return
+        val entry = entries[changedAddress] ?: return
+        var display = cards[changedAddress]
+        if (display == null) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(10))
+                setBackgroundColor(Color.WHITE)
             }
+            val nameView = TextView(this).apply {
+                textSize = 17f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.BLACK)
+            }
+            val typeView = TextView(this).apply {
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.rgb(40, 65, 89))
+                setPadding(0, dp(4), 0, 0)
+            }
+            val sourceView = TextView(this).apply {
+                textSize = 12f
+                setTextColor(Color.GRAY)
+                setPadding(0, dp(2), 0, 0)
+            }
+            val proximityView = TextView(this).apply {
+                textSize = 13f
+                setTextColor(Color.rgb(63, 83, 108))
+                setPadding(0, dp(5), 0, 0)
+            }
+            val pairView = Button(this).apply {
+                text = "طلب اقتران"
+                setOnClickListener { entries[changedAddress]?.device?.let { pairDevice(it) } }
+            }
+            card.addView(nameView)
+            card.addView(typeView)
+            card.addView(sourceView)
+            card.addView(proximityView)
+            card.addView(pairView)
+            val params = LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(10)
+            }
+            list.addView(card, params)
+            display = DeviceCard(nameView, typeView, sourceView, proximityView, pairView)
+            cards[changedAddress] = display
+        }
+        display.name.text = entry.name
+        display.category.text = entry.category + if (entry.paired) " · مقترن" else " · غير مقترن"
+        display.source.text = entry.source
+        display.proximity.text = "القرب: " + proximity(entry.rssi)
+        display.pair.visibility = if (entry.paired) View.GONE else View.VISIBLE
     }
 
     private fun pairDevice(device: BluetoothDevice) {
