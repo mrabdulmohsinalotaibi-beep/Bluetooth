@@ -19,7 +19,7 @@ button.primary{color:white;background:#343e4b;border-color:#343e4b}
 button:disabled{opacity:.6;cursor:wait}
 button:focus-visible,summary:focus-visible{outline:3px solid #7ca6ee;outline-offset:2px}
 .status{background:#f5f5f5;border-radius:12px;padding:14px;margin-top:18px;font-size:13px;line-height:1.8;text-align:right}
-.device{padding:16px 12px;text-align:right;background:#f7f8fa;border:1px solid #e7e9ef;border-radius:13px;margin-top:12px;font-size:14px;line-height:1.9;overflow-wrap:anywhere}.device strong{font-size:16px}.device small{color:#747474;display:block}.device .kind{font-weight:700;color:#32475f}
+.results{margin-top:18px;text-align:right;border:1px solid #e4e6eb;border-radius:16px;padding:14px;background:#fafbfc}.results h2{font-size:16px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}.count{font-size:12px;color:#656d75;font-weight:400}.empty{color:#737b82;font-size:13px;padding:14px 4px;line-height:1.9}.device{padding:16px 12px;text-align:right;background:#f7f8fa;border:1px solid #e7e9ef;border-radius:13px;margin-top:12px;font-size:14px;line-height:1.9;overflow-wrap:anywhere}.device strong{font-size:16px}.device small{color:#747474;display:block}.device .kind{font-weight:700;color:#32475f}
 details{text-align:right;border-top:1px solid #eee;margin-top:20px;padding-top:18px;font-size:14px}
 summary{cursor:pointer;font-weight:650}
 ol{padding-right:22px;line-height:2;color:#555;font-size:13px}
@@ -37,7 +37,12 @@ a{color:#35619a}
   <button id="known">عرض الأجهزة المسموح بها سابقًا</button>
   <button id="guide">طريقة توصيل سماعة صوتية</button>
   <div class="status" id="status" role="status" aria-live="polite">جاهز للبحث. قد يطلب المتصفح اختيار الجهاز والسماح بالوصول.</div>
-  <div id="devices" aria-label="الأجهزة التي اختارها المستخدم"></div>
+  <section class="results" aria-labelledby="nearby-title">
+    <h2 id="nearby-title">الأجهزة <span class="count" id="count">0 جهاز</span></h2>
+    <div id="devices" aria-label="أسماء الأجهزة وأنواعها">
+      <div class="empty" id="empty">لا توجد أجهزة معروضة بعد.</div>
+    </div>
+  </section>
   <p class="note" id="capability"></p>
   <details id="instructions">
     <summary>خطوات توصيل السماعات</summary>
@@ -57,11 +62,21 @@ a{color:#35619a}
 const button = document.querySelector("#scan");
 const status = document.querySelector("#status");
 const devices = document.querySelector("#devices");
+const count = document.querySelector("#count");
 const instructions = document.querySelector("#instructions");
 const capability = document.querySelector("#capability");
 function renderDevices(items) {
   devices.replaceChildren();
-  if (!items.length) { status.textContent = "لا توجد أجهزة سبق السماح للموقع بالوصول إليها. اضغط البحث لاختيار جهاز BLE متوافق."; return; }
+  count.textContent = items.length + " جهاز";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = supportsBluetooth ?
+      "لم تمنح الموقع الوصول إلى أي جهاز بعد. اضغط البحث واختر جهازًا من نافذة المتصفح." :
+      "لا يمكن عرض قائمة أجهزة البلوتوث الحقيقية على هذا المتصفح. يتطلب الاكتشاف المباشر على الآيفون تطبيق iOS أصليًا بإذن البلوتوث.";
+    devices.append(empty);
+    return;
+  }
   items.forEach(device => {
     const selected = document.createElement("div");
     selected.className = "device";
@@ -80,7 +95,8 @@ function renderDevices(items) {
 const supportsBluetooth = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
 capability.textContent = !window.isSecureContext ? "حالة الجهاز: يتطلب HTTPS." :
   supportsBluetooth ? "المتصفح يدعم اختيار بعض أجهزة BLE. لا يمكنه عرض جميع الأجهزة القريبة أو سماعات الصوت التقليدية." :
-  "المتصفح الحالي لا يدعم اكتشاف البلوتوث من صفحة ويب. افتح إعدادات البلوتوث في نظام جهازك لرؤية أسماء السماعات.";
+  "في iPhone/iPad لا يسمح Safari ولا تطبيق الويب بفحص أجهزة البلوتوث القريبة. هذه القائمة لا تعرض أسماءً تخمينية أو أجهزة وهمية. لرؤية السماعات المتاحة افتح الإعدادات ← Bluetooth؛ ولعرض فحص مباشر داخل تطبيق يلزم تطبيق iOS أصلي.";
+renderDevices([]);
 document.querySelector("#known").addEventListener("click", async () => {
   if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
     status.textContent = "ميزة عرض الأجهزة المسموح بها سابقًا غير مدعومة في هذا المتصفح.";
@@ -115,7 +131,7 @@ button.addEventListener("click", async () => {
   }
   if (!navigator.bluetooth || !navigator.bluetooth.requestDevice) {
     status.textContent = "المتصفح الحالي لا يدعم Web Bluetooth. استخدم إعدادات البلوتوث في جهازك للسماعات الصوتية.";
-    instructions.open = true;
+    renderDevices([]);
     return;
   }
   button.disabled = true;
