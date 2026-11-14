@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f5f2">
+<meta name="description" content="بلوتوث الذات: اكتشاف أجهزة BLE المتوافقة وإرشادات إقران السماعات.">
+<title>بلوتوث الذات | ATHAT</title>
+<style>
+*{box-sizing:border-box}
+:root{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:#292929;background:#f6f5f2}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:20px}
+main{width:min(100%,420px);padding:30px;border:1px solid #e7e4e0;border-radius:24px;background:white;box-shadow:0 14px 35px #2221;text-align:center}
+.symbol{display:grid;place-items:center;width:72px;height:72px;margin:auto;border-radius:20px;background:#eaf0ff;color:#315fae;font-size:40px}
+h1{font-size:24px;margin:18px 0 6px}
+p{color:#666;font-size:14px;line-height:1.8}
+button{font:600 15px system-ui;cursor:pointer;border:1px solid #ddd;border-radius:12px;background:white;width:100%;padding:14px;margin-top:10px;color:#292929}
+button.primary{color:white;background:#343e4b;border-color:#343e4b}
+button:disabled{opacity:.6;cursor:wait}
+button:focus-visible,summary:focus-visible{outline:3px solid #7ca6ee;outline-offset:2px}
+.status{background:#f5f5f5;border-radius:12px;padding:14px;margin-top:18px;font-size:13px;line-height:1.8;text-align:right}
+.device{padding:14px 4px;font-size:14px;overflow-wrap:anywhere}
+details{text-align:right;border-top:1px solid #eee;margin-top:20px;padding-top:18px;font-size:14px}
+summary{cursor:pointer;font-weight:650}
+ol{padding-right:22px;line-height:2;color:#555;font-size:13px}
+.note{font-size:12px;text-align:right;color:#777}
+footer{font-size:12px;color:#888;margin-top:24px}
+a{color:#35619a}
+</style>
+</head>
+<body>
+<main>
+  <div class="symbol" aria-hidden="true">ᛒ</div>
+  <h1>بلوتوث الذات</h1>
+  <p>ابحث عن أجهزة البلوتوث المتوافقة القريبة، واختر الأجهزة المصرّح لك باستخدامها.</p>
+  <button class="primary" id="scan">البحث عن الأجهزة</button>
+  <button id="guide">طريقة توصيل سماعة صوتية</button>
+  <div class="status" id="status" role="status" aria-live="polite">جاهز للبحث. قد يطلب المتصفح اختيار الجهاز والسماح بالوصول.</div>
+  <div id="devices" aria-label="الجهاز الذي اخترته"></div>
+  <details id="instructions">
+    <summary>خطوات توصيل السماعات</summary>
+    <ol>
+      <li>افتح إعدادات البلوتوث على هاتفك أو الكمبيوتر.</li>
+      <li>ضع السماعة في وضع الاقتران بإذن المسؤول عنها.</li>
+      <li>اختر السماعة وأكمل الموافقة أو إدخال الرمز إن طُلب.</li>
+      <li>بعد نجاح الاقتران، شغّل الموسيقى من تطبيقك المعتاد.</li>
+    </ol>
+    <p>Web Bluetooth مخصص لأجهزة Bluetooth Low Energy المتوافقة، ولا يستطيع عادةً إقران السماعات الصوتية التقليدية أو بث الموسيقى إليها.</p>
+  </details>
+  <p class="note">الخصوصية: لا تُرسل الصفحة أسماء الأجهزة أو تخزنها. لا يمكن تجاوز الموافقة على الاقتران.</p>
+  <footer>ATHAT · <a href="https://athat.app" rel="noopener noreferrer">الذات</a></footer>
+</main>
+<script>
+"use strict";
+const button = document.querySelector("#scan");
+const status = document.querySelector("#status");
+const devices = document.querySelector("#devices");
+const instructions = document.querySelector("#instructions");
+document.querySelector("#guide").addEventListener("click", () => {
+  instructions.open = true;
+  instructions.scrollIntoView({behavior:"smooth",block:"nearest"});
+});
+button.addEventListener("click", async () => {
+  if (!window.isSecureContext) {
+    status.textContent = "يجب فتح الموقع عبر اتصال HTTPS آمن.";
+    return;
+  }
+  if (!navigator.bluetooth || !navigator.bluetooth.requestDevice) {
+    status.textContent = "المتصفح الحالي لا يدعم Web Bluetooth. استخدم إعدادات البلوتوث في جهازك للسماعات الصوتية.";
+    instructions.open = true;
+    return;
+  }
+  button.disabled = true;
+  status.textContent = "اختر جهاز Bluetooth Low Energy من نافذة المتصفح.";
+  try {
+    const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+    const selected = document.createElement("div");
+    selected.className = "device";
+    selected.textContent = "الجهاز المختار: " + (device.name || "جهاز دون اسم");
+    devices.replaceChildren(selected);
+    status.textContent = "تم اختيار الجهاز من المتصفح فقط. هذه الخطوة لا تعني إنشاء اقتران صوتي. استخدم إعدادات النظام لتوصيل السماعات.";
+  } catch (err) {
+    status.textContent = err && err.name === "NotFoundError"
+      ? "لم يتم اختيار جهاز. يمكنك إعادة المحاولة."
+      : "تعذر اختيار الجهاز. تحقق من صلاحيات المتصفح وحالة البلوتوث.";
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
