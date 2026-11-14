@@ -19,7 +19,7 @@ button.primary{color:white;background:#343e4b;border-color:#343e4b}
 button:disabled{opacity:.6;cursor:wait}
 button:focus-visible,summary:focus-visible{outline:3px solid #7ca6ee;outline-offset:2px}
 .status{background:#f5f5f5;border-radius:12px;padding:14px;margin-top:18px;font-size:13px;line-height:1.8;text-align:right}
-.device{padding:14px 4px;font-size:14px;overflow-wrap:anywhere}
+.device{padding:16px 12px;text-align:right;background:#f7f8fa;border:1px solid #e7e9ef;border-radius:13px;margin-top:12px;font-size:14px;line-height:1.9;overflow-wrap:anywhere}.device strong{font-size:16px}.device small{color:#747474;display:block}.device .kind{font-weight:700;color:#32475f}
 details{text-align:right;border-top:1px solid #eee;margin-top:20px;padding-top:18px;font-size:14px}
 summary{cursor:pointer;font-weight:650}
 ol{padding-right:22px;line-height:2;color:#555;font-size:13px}
@@ -60,6 +60,20 @@ document.querySelector("#guide").addEventListener("click", () => {
   instructions.open = true;
   instructions.scrollIntoView({behavior:"smooth",block:"nearest"});
 });
+function describeDevice(name) {
+  const n = (name || "").toLowerCase();
+  const groups = [
+    {type:"سماعة أو جهاز صوتي (تقديري)",test:/speaker|soundbar|headphone|headset|earbud|earphone|buds|airpods|jbl|bose|sony wh-|sony wf-|marshall|soundcore|beats|سماعة/},
+    {type:"ساعة أو سوار ذكي (تقديري)",test:/watch|band|fitbit|garmin|amazfit|wearable|ساعة/},
+    {type:"هاتف أو جهاز لوحي (تقديري)",test:/iphone|ipad|galaxy|pixel|phone|tablet|هاتف/},
+    {type:"حاسوب أو ملحق حاسوب (تقديري)",test:/keyboard|mouse|laptop|macbook|logitech|لوحة مفاتيح|فأرة/},
+    {type:"طابعة (تقديري)",test:/printer|print|طابعة/},
+    {type:"تلفاز أو شاشة (تقديري)",test:/smart tv|television|android tv|شاشة|تلفاز/}
+  ];
+  const found = groups.find(g => g.test.test(n));
+  return found ? {type:found.type,certainty:"تخمين مستند إلى اسم الجهاز فقط"} :
+    {type:"جهاز Bluetooth Low Energy — النوع غير معروف",certainty:"لم يُعلن المتصفح نوع الجهاز"};
+}
 button.addEventListener("click", async () => {
   if (!window.isSecureContext) {
     status.textContent = "يجب فتح الموقع عبر اتصال HTTPS آمن.";
@@ -76,7 +90,15 @@ button.addEventListener("click", async () => {
     const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
     const selected = document.createElement("div");
     selected.className = "device";
-    selected.textContent = "الجهاز المختار: " + (device.name || "جهاز دون اسم");
+    const name = document.createElement("strong");
+    name.textContent = device.name || "جهاز دون اسم";
+    const type = document.createElement("div");
+    type.className = "kind";
+    const result = describeDevice(device.name);
+    type.textContent = "نوع الجهاز: " + result.type;
+    const explanation = document.createElement("small");
+    explanation.textContent = result.certainty + "؛ ولا يمكن تأكيد نوع الجهاز أو طرازه من Web Bluetooth وحده.";
+    selected.append(name,type,explanation);
     devices.replaceChildren(selected);
     status.textContent = "تم اختيار الجهاز من المتصفح فقط. هذه الخطوة لا تعني إنشاء اقتران صوتي. استخدم إعدادات النظام لتوصيل السماعات.";
   } catch (err) {
