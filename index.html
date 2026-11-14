@@ -34,9 +34,11 @@ a{color:#35619a}
   <h1>بلوتوث الذات</h1>
   <p>ابحث عن أجهزة البلوتوث المتوافقة القريبة، واختر الأجهزة المصرّح لك باستخدامها.</p>
   <button class="primary" id="scan">البحث عن الأجهزة</button>
+  <button id="known">عرض الأجهزة المسموح بها سابقًا</button>
   <button id="guide">طريقة توصيل سماعة صوتية</button>
   <div class="status" id="status" role="status" aria-live="polite">جاهز للبحث. قد يطلب المتصفح اختيار الجهاز والسماح بالوصول.</div>
-  <div id="devices" aria-label="الجهاز الذي اخترته"></div>
+  <div id="devices" aria-label="الأجهزة التي اختارها المستخدم"></div>
+  <p class="note" id="capability"></p>
   <details id="instructions">
     <summary>خطوات توصيل السماعات</summary>
     <ol>
@@ -56,6 +58,38 @@ const button = document.querySelector("#scan");
 const status = document.querySelector("#status");
 const devices = document.querySelector("#devices");
 const instructions = document.querySelector("#instructions");
+const capability = document.querySelector("#capability");
+function renderDevices(items) {
+  devices.replaceChildren();
+  if (!items.length) { status.textContent = "لا توجد أجهزة سبق السماح للموقع بالوصول إليها. اضغط البحث لاختيار جهاز BLE متوافق."; return; }
+  items.forEach(device => {
+    const selected = document.createElement("div");
+    selected.className = "device";
+    const name = document.createElement("strong");
+    name.textContent = device.name || "جهاز دون اسم";
+    const type = document.createElement("div");
+    type.className = "kind";
+    const result = describeDevice(device.name);
+    type.textContent = "نوع الجهاز: " + result.type;
+    const explanation = document.createElement("small");
+    explanation.textContent = result.certainty + "؛ النوع غير مؤكد من المتصفح.";
+    selected.append(name,type,explanation);
+    devices.append(selected);
+  });
+}
+const supportsBluetooth = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
+capability.textContent = !window.isSecureContext ? "حالة الجهاز: يتطلب HTTPS." :
+  supportsBluetooth ? "المتصفح يدعم اختيار بعض أجهزة BLE. لا يمكنه عرض جميع الأجهزة القريبة أو سماعات الصوت التقليدية." :
+  "المتصفح الحالي لا يدعم اكتشاف البلوتوث من صفحة ويب. افتح إعدادات البلوتوث في نظام جهازك لرؤية أسماء السماعات.";
+document.querySelector("#known").addEventListener("click", async () => {
+  if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
+    status.textContent = "ميزة عرض الأجهزة المسموح بها سابقًا غير مدعومة في هذا المتصفح.";
+    return;
+  }
+  try { const list=await navigator.bluetooth.getDevices(); renderDevices(list);
+    if(list.length) status.textContent="الأجهزة التي سبق السماح بها على هذا المتصفح (وليست جميع الأجهزة القريبة): "+list.length;
+  } catch {status.textContent="تعذرت قراءة الأجهزة المسموح بها مسبقًا."}
+});
 document.querySelector("#guide").addEventListener("click", () => {
   instructions.open = true;
   instructions.scrollIntoView({behavior:"smooth",block:"nearest"});
@@ -88,18 +122,7 @@ button.addEventListener("click", async () => {
   status.textContent = "اختر جهاز Bluetooth Low Energy من نافذة المتصفح.";
   try {
     const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
-    const selected = document.createElement("div");
-    selected.className = "device";
-    const name = document.createElement("strong");
-    name.textContent = device.name || "جهاز دون اسم";
-    const type = document.createElement("div");
-    type.className = "kind";
-    const result = describeDevice(device.name);
-    type.textContent = "نوع الجهاز: " + result.type;
-    const explanation = document.createElement("small");
-    explanation.textContent = result.certainty + "؛ ولا يمكن تأكيد نوع الجهاز أو طرازه من Web Bluetooth وحده.";
-    selected.append(name,type,explanation);
-    devices.replaceChildren(selected);
+    renderDevices([device]);
     status.textContent = "تم اختيار الجهاز من المتصفح فقط. هذه الخطوة لا تعني إنشاء اقتران صوتي. استخدم إعدادات النظام لتوصيل السماعات.";
   } catch (err) {
     status.textContent = err && err.name === "NotFoundError"
