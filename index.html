@@ -15,7 +15,7 @@ main{width:min(100%,420px);padding:30px;border:1px solid #e7e4e0;border-radius:2
 h1{font-size:24px;margin:18px 0 6px}
 p{color:#666;font-size:14px;line-height:1.8}
 button{font:600 15px system-ui;cursor:pointer;border:1px solid #ddd;border-radius:12px;background:white;width:100%;padding:14px;margin-top:10px;color:#292929}
-button.primary{color:white;background:#343e4b;border-color:#343e4b}
+button.primary{color:white;background:#343e4b;border-color:#343e4b}.android-link{display:block;text-decoration:none;margin-top:12px;border-radius:12px;padding:15px;background:#e8f2e8;color:#235c34;font-size:15px;font-weight:700}.android-sub{font-size:12px;color:#586459;margin:8px 0 14px}
 button:disabled{opacity:.6;cursor:wait}
 button:focus-visible,summary:focus-visible{outline:3px solid #7ca6ee;outline-offset:2px}
 .status{background:#f5f5f5;border-radius:12px;padding:14px;margin-top:18px;font-size:13px;line-height:1.8;text-align:right}
@@ -33,7 +33,9 @@ a{color:#35619a}
   <div class="symbol" aria-hidden="true">ᛒ</div>
   <h1>بلوتوث الذات</h1>
   <p>ابحث عن أجهزة البلوتوث المتوافقة القريبة، واختر الأجهزة المصرّح لك باستخدامها.</p>
-  <button class="primary" id="scan">البحث عن الأجهزة</button>
+  <a class="android-link" href="https://github.com/mrabdulmohsinalotaibi-beep/Bluetooth/actions/runs/43628054389">تطبيق أندرويد الأصلي — ملف APK</a>
+  <p class="android-sub">على أندرويد: نزّل APK من GitHub Actions وثبّته لعرض الأجهزة الفعلية. هذه الصفحة نفسها لا تملك صلاحيات التطبيق الأصلي.</p>
+  <button class="primary" id="scan">البحث عن الأجهزة في المتصفح (BLE)</button>
   <button id="known">عرض الأجهزة المسموح بها سابقًا</button>
   <button id="guide">طريقة توصيل سماعة صوتية</button>
   <div class="status" id="status" role="status" aria-live="polite">جاهز للبحث. قد يطلب المتصفح اختيار الجهاز والسماح بالوصول.</div>
